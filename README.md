@@ -1,8 +1,8 @@
 # libhttp_connector
 
-This program is simple and basic http connector.
-support Linux and MinGW.
-required OpenSSL.
+This program is simple and basic http connector.  
+support Linux and MinGW.  
+required OpenSSL.  
 using build tools of CMake.
 
 
