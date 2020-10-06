@@ -1,6 +1,5 @@
 #include "./http_connector.h"
 
-
 int set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
   if(response_data == NULL) {
@@ -365,6 +364,12 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char 
 
 int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t data_size, Method method, url_data_s *url_data)
 {
+
+  if(url == NULL) {
+    puts("Error: url is NULL");
+    return -1;
+  }
+  
   if(url_size < 7) {
     puts("Error: invalid url. Please least length 7 or higher.");
     return -1;
@@ -523,7 +528,6 @@ char* create_header(url_data_s *url_data, const char *user_agent, Method method,
 
 int get_http_response(const char *url, const char *user_agent, response_s *response)
 {
-
   url_data_s *url_data = (url_data_s*)malloc(sizeof(url_data_s));
   int err = set_url_data(url, strlen(url), NULL, 0, GET, url_data);
   if(err == -1) {
