@@ -11,11 +11,18 @@
   #include <netinet/in.h>
   #include <arpa/inet.h>
   #include <netdb.h>
+  #include <unistd.h>
+#endif
+
+#if defined(__GNU__)
+  #include <unistd.h>
+#elif defined(_MSC_VER)
+  #include <io.h>
+  #define ssize_t unsigned long
 #endif
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
 
