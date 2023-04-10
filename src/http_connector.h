@@ -112,11 +112,11 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
 
 int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst);
 
-int resolve_hostname(const char* hostname, ipaddr_s *dst);
+int resolve_hostname(const char* hostname, struct hostent **host);
 
 void init_socket(socket_data_s *socket_data);
 
-void set_addr(socket_data_s *socket_data, const url_data_s *url_data);
+void set_addr_from_hostname(socket_data_s *socket_data, const url_data_s *url_data);
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char *data, response_s *response);
 

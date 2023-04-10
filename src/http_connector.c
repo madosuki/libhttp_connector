@@ -1,4 +1,5 @@
 #include "./http_connector.h"
+#include <netdb.h>
 #include <stdlib.h>
 
 int set_http_response_data(const char *response_data, ssize_t size, response_s *result)
@@ -180,20 +181,16 @@ int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst)
   return 1;
 }
 
-int resolve_hostname(const char* hostname, ipaddr_s *dst)
+int resolve_hostname(const char* hostname, struct hostent **host)
 {
+  *host = gethostbyname(hostname);
 
-  struct hostent *tmp;
-  tmp = gethostbyname(hostname);
-
-  if(tmp == NULL) {
+  if(host == NULL) {
     fprintf(stderr, "gethostbyname() failed: %s\n", strerror(errno));
     return -1;
   }
 
-  int err = get_ipaddr_from_host(tmp, dst);
-
-  return err;
+  return 1;
 }
 
 void init_socket(socket_data_s *socket_data)
@@ -214,27 +211,22 @@ void init_socket(socket_data_s *socket_data)
   
 }
 
-void set_addr(socket_data_s *socket_data, const url_data_s *url_data)
+void set_addr_from_hostname(socket_data_s *socket_data, const url_data_s *url_data)
 {
-  /* char **ip_list = INIT_ARRAY(char*, 1024); */
-  ipaddr_s ipaddr;
-  int err = resolve_hostname(url_data->hostname, &ipaddr);
 
-  const char* addr = "127.0.0.1";
+  struct hostent *host;
+  int err = resolve_hostname(url_data->hostname, &host);
+  
+  ipaddr_s ipaddr;
+  err = get_ipaddr_from_host(host, &ipaddr);
+
+  char* addr = "127.0.0.1";
 
   if(ipaddr.list[0].ipaddr_str != NULL)
     addr = ipaddr.list[0].ipaddr_str;
 
   socket_data->target.sin_addr.s_addr = inet_addr(addr);
 
-  /* for(int i = 0; i < 1024; ++i) { */
-  /*   if(ip_list[i] != NULL) { */
-  /*     FREE(ip_list[i]); */
-  /*     ip_list[i] = NULL; */
-  /*   } */
-  /* } */
-
-  /* FREE(ip_list); */
   FREE(ipaddr.list);
 }
 
