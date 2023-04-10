@@ -18,7 +18,7 @@
   #include <unistd.h>
 #elif defined(_MSC_VER)
   #include <io.h>
-  #define ssize_t unsigned long
+  #define ssize_t long
 #endif
 
 #include <stdio.h>
