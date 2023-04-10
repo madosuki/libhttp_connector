@@ -1,4 +1,5 @@
 #include "./http_connector.h"
+#include <stdlib.h>
 
 int set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
@@ -105,46 +106,81 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
   return 1;
 }
 
-void get_ipaddr_from_host(struct hostent *host, char **list)
+int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst)
 {
-  if(host->h_length > 4) {
-    puts("v6");
-    for(int i = 0; i < host->h_length - 1; ++i) {
-      printf("%d\n", (unsigned char)*host->h_addr_list[i]);
+
+  const int byte_size = host->h_length;
+  
+  long list_size = 1024;
+  long count = 0;
+  dst->list = INIT_ARRAY(ipaddr_str_s, list_size);
+  for(int i = 0; host->h_addr_list[i]; ++i) {
+
+    unsigned char byte_list[byte_size];
+    memset(byte_list, 0, byte_size);
+
+    int size = 0;
+    int split_count = 0;
+    for(int j = 0; j < byte_size; ++j) {
+      byte_list[j] = (unsigned char)*(host->h_addr_list[i] + j);
+      char tmp[byte_size];
+      memset(tmp, 0, byte_size);
+      int sprintf_result = EOF;
+      if (byte_size == 4) {
+         sprintf_result = sprintf(tmp, "%d", byte_list[j]);
+      } else {
+        sprintf_result = sprintf(tmp, "%x", byte_list[j]);
+      }
+      // FIXME: add check whether EOF from sprintf_result
+      size += sprintf_result;
+      ++split_count;
     }
-  } else {
-    puts("v4");
-    for(int i = 0; host->h_addr_list[i]; ++i) {
 
-      unsigned char *byte_list = INIT_ARRAY(unsigned char, 4);
+    char final_size = size + 1;
+    // for three dot
+    if (byte_size == 4) {
+      final_size += 3;
+    } else {
+      final_size += 7;
+    }
+    
+    char *result = INIT_ARRAY(char, final_size);
+    if (result == NULL) {
+      dst->list_size = count;
+      return -1;
+    }
 
-      byte_list[0] = (unsigned char)*host->h_addr_list[i];
-      char first[3];
-      sprintf(first, "%d", byte_list[0]);
-      int size = strlen(first) + 4;
+    if (byte_size == 4) {
+      sprintf(result, "%d.%d.%d.%d", byte_list[0], byte_list[1], byte_list[2], byte_list[3]);
+    } else {
+      sprintf(result, "%x:%x:%x:%x:%x:%x:%x:%x", byte_list[0], byte_list[1], byte_list[2], byte_list[3], byte_list[4], byte_list[5], byte_list[6], byte_list[7]);
+    }
 
-      for(int j = 1; j < 4; ++j) {
-        byte_list[j] = (unsigned char)*(host->h_addr_list[i] + j);
-        char tmp[3];
-        sprintf(tmp, "%d", byte_list[j]);
-        size += strlen(tmp);
+    if (count > 1024) {
+      ipaddr_str_s* tmp = realloc(dst->list, count);
+      if (tmp == NULL) {
+        dst->list_size = count;
+        FREE(result);
+        
+        return -1;
       }
 
-      char *result = INIT_ARRAY(char, size);
-      sprintf(result, "%d.%d.%d.%d", byte_list[0], byte_list[1], byte_list[2], byte_list[3]);
-
-      FREE(byte_list);
-
-      list[i] = result;
-
-      printf("%s\n", list[i]);
-
+      dst->list = tmp;
     }
 
+
+    dst->list[i].ipaddr_str = result;
+    dst->list[i].size = final_size;
+    
+    ++count;
   }
+
+  dst->list_size = count;
+  
+  return 1;
 }
 
-int resolve_hostname(const char* hostname, char **ip_list)
+int resolve_hostname(const char* hostname, ipaddr_s *dst)
 {
 
   struct hostent *tmp;
@@ -155,9 +191,9 @@ int resolve_hostname(const char* hostname, char **ip_list)
     return -1;
   }
 
-  get_ipaddr_from_host(tmp, ip_list);
+  int err = get_ipaddr_from_host(tmp, dst);
 
-  return 1;
+  return err;
 }
 
 void init_socket(socket_data_s *socket_data)
@@ -180,25 +216,26 @@ void init_socket(socket_data_s *socket_data)
 
 void set_addr(socket_data_s *socket_data, const url_data_s *url_data)
 {
-  char **ip_list = INIT_ARRAY(char*, 1024);
-  int err = resolve_hostname(url_data->hostname, ip_list);
+  /* char **ip_list = INIT_ARRAY(char*, 1024); */
+  ipaddr_s ipaddr;
+  int err = resolve_hostname(url_data->hostname, &ipaddr);
 
   const char* addr = "127.0.0.1";
 
-  if(ip_list[0] != NULL)
-    addr = ip_list[0];
+  if(ipaddr.list[0].ipaddr_str != NULL)
+    addr = ipaddr.list[0].ipaddr_str;
 
   socket_data->target.sin_addr.s_addr = inet_addr(addr);
 
-  for(int i = 0; i < 1024; ++i) {
-    if(ip_list[i] != NULL) {
-      FREE(ip_list[i]);
-      ip_list[i] = NULL;
-    }
-  }
+  /* for(int i = 0; i < 1024; ++i) { */
+  /*   if(ip_list[i] != NULL) { */
+  /*     FREE(ip_list[i]); */
+  /*     ip_list[i] = NULL; */
+  /*   } */
+  /* } */
 
-  FREE(ip_list);
-  
+  /* FREE(ip_list); */
+  FREE(ipaddr.list);
 }
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char *data, response_s *response)

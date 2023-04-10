@@ -95,11 +95,24 @@ typedef struct ResponseStruct
   ssize_t header_list_size;
 } response_s;
 
+
+typedef struct IppAddrStringStruct
+{
+  size_t size;
+  char *ipaddr_str;
+} ipaddr_str_s;
+
+typedef struct IpAddrStruct
+{
+  size_t list_size;
+  ipaddr_str_s *list;
+} ipaddr_s;
+
 int set_http_response_data(const char *response_data, ssize_t size, response_s *result);
 
-void get_ipaddr_from_host(struct hostent *host, char **list);
+int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst);
 
-int resolve_hostname(const char* hostname, char **ip_list);
+int resolve_hostname(const char* hostname, ipaddr_s *dst);
 
 void init_socket(socket_data_s *socket_data);
 
