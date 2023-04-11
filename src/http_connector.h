@@ -55,6 +55,21 @@ typedef enum {
   HTTP_1_1
 } HttpVersion;
 
+typedef enum {
+  FailedMemoryAllocate,
+  Success,
+  DataIsNull,
+  DataIsLess,
+  NotFoundBody,
+  SizeOver,
+  
+} LibHttpConnectorError;
+
+typedef enum {
+  Ipv4,
+  Ipv6
+} IpVersion;
+
 typedef struct SocketDataStruct {
 
   struct sockaddr_in target;
@@ -102,21 +117,28 @@ typedef struct IppAddrStringStruct
   char *ipaddr_str;
 } ipaddr_str_s;
 
+typedef struct SockAddrStruct
+{
+  IpVersion ip_version;
+  struct sockaddr_in for_ipv4;
+  struct sockaddr_in6 for_ipv6;
+} sock_addr_s;
+
 typedef struct IpAddrStruct
 {
   size_t list_size;
   ipaddr_str_s *list;
 } ipaddr_s;
 
-int set_http_response_data(const char *response_data, ssize_t size, response_s *result);
+LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result);
 
-int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst);
+LibHttpConnectorError get_ipaddr_from_host(struct hostent *host, int af, ipaddr_s *dst);
 
-int resolve_hostname(const char* hostname, struct hostent **host);
+int resolve_hostname(const char* hostname, int af, struct hostent **host);
 
 void init_socket(socket_data_s *socket_data);
 
-void set_addr_from_hostname(socket_data_s *socket_data, const url_data_s *url_data);
+LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, const url_data_s *url_data);
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char *data, response_s *response);
 
@@ -124,6 +146,6 @@ int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t da
 
 char* create_header(url_data_s *url_data, const char* user_agent, Method method, HttpVersion version);
 
-int get_http_response(const char *url, const char *user_agent, response_s *response);
+int get_http_response(const char *url, int af, const char *user_agent, response_s *response);
 
 #endif

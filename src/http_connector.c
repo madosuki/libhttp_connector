@@ -1,36 +1,32 @@
 #include "./http_connector.h"
+#include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
-int set_http_response_data(const char *response_data, ssize_t size, response_s *result)
+LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
   if(response_data == NULL) {
     printf("Error: response data is NULL\n");
-    return -1;
+    return DataIsNull;
   }
 
   if(size < 1) {
     printf("Error: size is less than one.\n");
-    return -1;
+    return DataIsLess;
   }
 
   char *header = INIT_ARRAY(char, size + 1);
   ssize_t count = 0;
   int new_line_count = 0;
   char previous = 0;
-  // char **header_list = INIT_ARRAY(char*, 1);
-  char *tmp_header_list_contents = NULL;
-  ssize_t tmp_header_list_contents_size = 0;
-  // int header_list_count = 0;
   for(ssize_t i = 0; i < size; ++i) {
 
     if(previous == '\n' && response_data[i] != '\r') {
       new_line_count = 0;
       previous = 0;
-
-      /* if(tmp_header_list_contents != NULL) { */
-      /* } */
-      
     }
 
     if(previous == '\r') {
@@ -47,11 +43,6 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
       previous = '\r';
     }
 
-    /* if(response_data[i] != '\r' && response_data[i] != '\n') { */
-    /*   tmp_header_list_contents[tmp_header_list_contents_size] = response_data[i]; */
-    /*   ++tmp_header_list_contents_size; */
-    /* } */
-
     header[i] = response_data[i];
     
     ++count;
@@ -66,7 +57,7 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
 
     printf("Error: over max http header size. Limit size: %d bytes\n", MAX_HTTP_HEADER_SIZE);
     
-    return -1;
+    return SizeOver;
   }
 
   if(count >= size) {
@@ -74,7 +65,7 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
 
     printf("Error: missing body\n");
 
-    return -1;
+    return NotFoundBody;
   }
   header[count] = '\0';
 
@@ -84,7 +75,7 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
 
     printf("Error: failed reallocate at header\n");
 
-    return -1;
+    return FailedMemoryAllocate;
   }
 
   header = reallocated;
@@ -101,89 +92,61 @@ int set_http_response_data(const char *response_data, ssize_t size, response_s *
   result->body = body;
 
   result->raw_header_size = count;
-  // result->header_size = strlen(header);
   result->raw_header = header;
   
-  return 1;
+  return Success;
 }
 
-int get_ipaddr_from_host(struct hostent *host, ipaddr_s *dst)
+LibHttpConnectorError get_ipaddr_from_host(struct hostent *host, int af, ipaddr_s *dst)
 {
+  dst->list = INIT_ARRAY(ipaddr_str_s, 1024);
+  if (dst->list == NULL) {
+    return FailedMemoryAllocate;
+  }
 
-  const int byte_size = host->h_length;
+  size_t str_size = INET_ADDRSTRLEN;
+  if (af == AF_INET6) {
+    str_size = INET6_ADDRSTRLEN;
+  }
   
-  long list_size = 1024;
-  long count = 0;
-  dst->list = INIT_ARRAY(ipaddr_str_s, list_size);
-  for(int i = 0; host->h_addr_list[i]; ++i) {
 
-    unsigned char byte_list[byte_size];
-    memset(byte_list, 0, byte_size);
-
-    int size = 0;
-    int split_count = 0;
-    for(int j = 0; j < byte_size; ++j) {
-      byte_list[j] = (unsigned char)*(host->h_addr_list[i] + j);
-      char tmp[byte_size];
-      memset(tmp, 0, byte_size);
-      int sprintf_result = EOF;
-      if (byte_size == 4) {
-         sprintf_result = sprintf(tmp, "%d", byte_list[j]);
-      } else {
-        sprintf_result = sprintf(tmp, "%x", byte_list[j]);
-      }
-      // FIXME: add check whether EOF from sprintf_result
-      size += sprintf_result;
-      ++split_count;
-    }
-
-    char final_size = size + 1;
-    // for three dot
-    if (byte_size == 4) {
-      final_size += 3;
-    } else {
-      final_size += 7;
-    }
-    
-    char *result = INIT_ARRAY(char, final_size);
-    if (result == NULL) {
-      dst->list_size = count;
-      return -1;
-    }
-
-    if (byte_size == 4) {
-      sprintf(result, "%d.%d.%d.%d", byte_list[0], byte_list[1], byte_list[2], byte_list[3]);
-    } else {
-      sprintf(result, "%x:%x:%x:%x:%x:%x:%x:%x", byte_list[0], byte_list[1], byte_list[2], byte_list[3], byte_list[4], byte_list[5], byte_list[6], byte_list[7]);
-    }
-
-    if (count > 1024) {
-      ipaddr_str_s* tmp = realloc(dst->list, count);
+  int count = 0;
+  for (int i = 0; host->h_addr_list[i]; ++i) {
+    if (i >= 1024) {
+      ipaddr_str_s* tmp = realloc(dst->list, i);
+      
       if (tmp == NULL) {
-        dst->list_size = count;
-        FREE(result);
-        
-        return -1;
+        dst->list_size = i;
+        return FailedMemoryAllocate;
       }
 
       dst->list = tmp;
     }
-
-
-    dst->list[i].ipaddr_str = result;
-    dst->list[i].size = final_size;
     
+    char *buf = INIT_ARRAY(char, str_size);
+    if (buf == NULL) {
+      return FailedMemoryAllocate;
+    }
+    const char *pointer = inet_ntop(af, host->h_addr_list[0], buf, str_size);
+    
+    dst->list[i].ipaddr_str = INIT_ARRAY(char, str_size);
+    if (dst->list[i].ipaddr_str == NULL) {
+      FREE(buf);
+      return -1;
+    }
+    dst->list[i].size = str_size;
+    memmove(dst->list[i].ipaddr_str, buf, str_size);
     ++count;
   }
-
   dst->list_size = count;
   
-  return 1;
+  return Success;
 }
 
-int resolve_hostname(const char* hostname, struct hostent **host)
+
+int resolve_hostname(const char* hostname, int af, struct hostent **host)
 {
-  *host = gethostbyname(hostname);
+  *host = gethostbyname2(hostname, af);
 
   if(host == NULL) {
     fprintf(stderr, "gethostbyname() failed: %s\n", strerror(errno));
@@ -211,14 +174,26 @@ void init_socket(socket_data_s *socket_data)
   
 }
 
-void set_addr_from_hostname(socket_data_s *socket_data, const url_data_s *url_data)
+LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, const url_data_s *url_data)
 {
 
   struct hostent *host;
-  int err = resolve_hostname(url_data->hostname, &host);
+  LibHttpConnectorError err = resolve_hostname(url_data->hostname, af, &host);
   
   ipaddr_s ipaddr;
-  err = get_ipaddr_from_host(host, &ipaddr);
+  err = get_ipaddr_from_host(host, af, &ipaddr);
+  if (err != Success) {
+    if (ipaddr.list != NULL) {
+      for (size_t i = 0; i < ipaddr.list_size; ++i) {
+        if (ipaddr.list[i].ipaddr_str != NULL) {
+          FREE(ipaddr.list[i].ipaddr_str);
+        }
+      }
+
+      FREE(ipaddr.list);
+    }
+    return err;
+  }
 
   char* addr = "127.0.0.1";
 
@@ -228,6 +203,7 @@ void set_addr_from_hostname(socket_data_s *socket_data, const url_data_s *url_da
   socket_data->target.sin_addr.s_addr = inet_addr(addr);
 
   FREE(ipaddr.list);
+  return Success;
 }
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char *data, response_s *response)
@@ -554,8 +530,7 @@ char* create_header(url_data_s *url_data, const char *user_agent, Method method,
   return header;
 }
 
-
-int get_http_response(const char *url, const char *user_agent, response_s *response)
+int get_http_response(const char *url, int af, const char *user_agent, response_s *response)
 {
   url_data_s *url_data = (url_data_s*)malloc(sizeof(url_data_s));
   int err = set_url_data(url, strlen(url), NULL, 0, GET, url_data);
@@ -597,7 +572,7 @@ int get_http_response(const char *url, const char *user_agent, response_s *respo
 
     init_socket(&socket_data);
 
-    set_addr(&socket_data, url_data);
+    set_addr_from_hostname(&socket_data, af, url_data);
 
     /* response_s *response = INIT_ARRAY(response_s, sizeof(response_s)); */
     /* if(response == NULL) { */
