@@ -4,8 +4,8 @@
 #ifdef _WIN32
   #include <winsock2.h>
   #include <windows.h>
-  #define INET_ADDRSTRLEN 16
-  #define INET6_ADDRSTRLEN 46
+  #include <ws2ipdef.h>
+  #include <ws2tcpip.h>
 #else
   #include <sys/fcntl.h>
   #include <sys/types.h>

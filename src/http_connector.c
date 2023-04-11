@@ -1,8 +1,4 @@
 #include "./http_connector.h"
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
@@ -226,7 +222,11 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char 
       SSL_free(ssl);
       SSL_CTX_free(ctx);
       
-      close(socket_data->socket);
+      #ifdef _WIN32
+        closesocket(socket_data->socket);
+      #else
+        close(socket_data->socket);
+      #endif
       
       return -1;
     }
@@ -241,7 +241,11 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl, const char 
       SSL_free(ssl);
       SSL_CTX_free(ctx);
       
-      close(socket_data->socket);
+      #ifdef _WIN32
+        closesocket(socket_data->socket);
+      #else
+        close(socket_data->socket);
+      #endif
       
       return -1;
     }
@@ -544,7 +548,7 @@ int get_http_response(const char *url, int af, int socktype, const char *service
     int wsa_error = WSAStartup(MAKEWORD(2, 0), &wsaData);
     #endif
 
-    init_socket(&socket_data);
+    init_socket(&socket_data, af, socktype);
 
     set_addr_from_hostname(&socket_data, af, socktype, service, url_data);
 
