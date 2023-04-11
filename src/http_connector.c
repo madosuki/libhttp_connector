@@ -1,16 +1,19 @@
 #include "./http_connector.h"
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <string.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
   if(response_data == NULL) {
     printf("Error: response data is NULL\n");
-    return DataIsNull;
+    return DATA_IS_NULL;
   }
 
   if(size < 1) {
     printf("Error: size is less than one.\n");
-    return DataIsLess;
+    return DATA_IS_LESS;
   }
 
   char *header = INIT_ARRAY(char, size + 1);
@@ -52,7 +55,7 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
 
     printf("Error: over max http header size. Limit size: %d bytes\n", MAX_HTTP_HEADER_SIZE);
     
-    return SizeOver;
+    return SIZE_OVER;
   }
 
   if(count >= size) {
@@ -60,7 +63,7 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
 
     printf("Error: missing body\n");
 
-    return NotFoundBody;
+    return NOT_FOUND_BODY;
   }
   header[count] = '\0';
 
@@ -70,7 +73,7 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
 
     printf("Error: failed reallocate at header\n");
 
-    return FailedMemoryAllocate;
+    return FAI_MEM_ALLOC;
   }
 
   header = reallocated;
@@ -89,10 +92,10 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
   result->raw_header_size = count;
   result->raw_header = header;
   
-  return Success;
+  return SUCCESS;
 }
 
-LibHttpConnectorError get_ipaddr_from_addrinfo(struct addrinfo *addr_info, ipaddr_str_s *dst)
+LibHttpConnectorError get_ipaddr_str_from_addrinfo(struct addrinfo *addr_info, ipaddr_s *dst)
 {
   size_t str_size = 0;
   switch (addr_info->ai_family) {
@@ -108,21 +111,30 @@ LibHttpConnectorError get_ipaddr_from_addrinfo(struct addrinfo *addr_info, ipadd
 
   dst->ipaddr_str = INIT_ARRAY(char, str_size);
   if (dst->ipaddr_str == NULL) {
-    return FailedMemoryAllocate;
+    return FAI_MEM_ALLOC;
   }
   
   char *buf = INIT_ARRAY(char, str_size);
   if (buf == NULL) {
-    return FailedMemoryAllocate;
+    return FAI_MEM_ALLOC;
   }
 
-  const char *pointer = inet_ntop(addr_info->ai_family, &((struct sockaddr_in *)addr_info->ai_addr)->sin_addr, buf, str_size);
-  memmove(dst->ipaddr_str, buf, str_size);
+  if (addr_info->ai_family == AF_INET) {
+    struct in_addr *addr = &((struct sockaddr_in *)addr_info->ai_addr)->sin_addr;
+    const char *pointer = inet_ntop(addr_info->ai_family, addr, buf, str_size);
+    memmove(dst->ipaddr_str, buf, str_size);
+  }
+
+  if (addr_info->ai_family == AF_INET6) {
+    struct in6_addr *addr = &((struct sockaddr_in6 *)addr_info->ai_addr)->sin6_addr;
+    const char *pointer = inet_ntop(addr_info->ai_family, addr, buf, str_size);
+    memmove(dst->ipaddr_str, buf, str_size);
+  }
 
   size_t str_length = strlen(dst->ipaddr_str);
-  dst->size = str_length;
-  
-  return Success;
+  dst->str_size = str_length;
+
+  return SUCCESS;
 }
 
 
@@ -147,7 +159,6 @@ void init_socket(socket_data_s *socket_data, int af, int socktype)
 
   socket_data->socket = sock;
   socket_data->target = target;
-  
 }
 
 LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, const char *service, const url_data_s *url_data)
@@ -157,10 +168,10 @@ LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af,
   hints.ai_family = af;
   hints.ai_socktype = socktype;
   LibHttpConnectorError err = get_addr_info_from_hostname(url_data->hostname, service, &hints, &addr_info);
-  
-  ipaddr_str_s ipaddr;
-  err = get_ipaddr_from_addrinfo(addr_info, &ipaddr);
-  if (err != Success) {
+
+  ipaddr_s ipaddr;
+  err = get_ipaddr_str_from_addrinfo(addr_info, &ipaddr);
+  if (err != SUCCESS) {
     freeaddrinfo(addr_info);
 
     return err;
@@ -172,15 +183,20 @@ LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af,
     addr = ipaddr.ipaddr_str;
 
   err = inet_pton(addr_info->ai_family, addr, &socket_data->target.sin_addr.s_addr);
+  freeaddrinfo(addr_info);
+  if (err != 0) {
+    return FAI_SET_IP_ADDR;
+  }
 
-  return Success;
+
+  return SUCCESS;
 }
 
-int send_data_and_revice_response(socket_data_s *socket_data, const char *data, response_s *response)
+LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, const char *data, response_s *response)
 {
   char *buf = INIT_ARRAY(char, BUF_SIZE);
   if (buf == NULL) {
-    return -1;
+    return FAI_MEM_ALLOC;
   }
   
   long readed_size = 0;
@@ -209,8 +225,8 @@ int send_data_and_revice_response(socket_data_s *socket_data, const char *data, 
     // first argument is must be that socket + 1. This value is max size of socket.
     err = select(socket_data->socket + 1, &fds, NULL, NULL, &tv);
     if(!err) {
-      printf("timeout\n");
-      break;
+      /* printf("timeout\n"); */
+      goto end;
     }
 
     if(FD_ISSET(socket_data->socket, &fds)) {
@@ -222,7 +238,7 @@ int send_data_and_revice_response(socket_data_s *socket_data, const char *data, 
       else
         readed_size = SSL_read(ssl, buf, BUF_SIZE);
 
-      printf("count: %d, readed size: %ld\nbody: %s\n", count, readed_size, buf);
+      /* printf("count: %d, readed size: %ld\nbody: %s\n", count, readed_size, buf); */
     }
 
     result_size += readed_size;
@@ -239,6 +255,7 @@ int send_data_and_revice_response(socket_data_s *socket_data, const char *data, 
 
   } while(readed_size > 0 && count < 3);
 
+ end:
   if(is_ssl) {
     SSL_shutdown(ssl);
     SSL_free(ssl);
@@ -250,17 +267,19 @@ int send_data_and_revice_response(socket_data_s *socket_data, const char *data, 
 
   FREE(buf);
 
-  if(set_http_response_data(result, strlen(result), response)) {
-    printf("header size: %ld\nheader: %s\n\nbody size: %ld\nbody: %s\n",
-           response->raw_header_size,
-           response->raw_header,
-           response->body_size,
-           response->body);
+  if(set_http_response_data(result, strlen(result), response) != SUCCESS) {
+    FREE(result);
+    return FAI_SET_RES_DATA;
+    /* printf("header size: %ld\nheader: %s\n\nbody size: %ld\nbody: %s\n", */
+    /*        response->raw_header_size, */
+    /*        response->raw_header, */
+    /*        response->body_size, */
+    /*        response->body); */
   }
   
   FREE(result);  
 
-  return 1;
+  return SUCCESS;
 }
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
@@ -380,8 +399,6 @@ int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t da
 
   ssize_t path_pos = 0;
   char *path = INIT_ARRAY(char, url_size + 1);
-  /* int is_get_query = 0; */
-  /* ssize_t get_query_pos = 0; */
   for(ssize_t i = pos + init_value; i < url_size; ++i) {
     path[path_pos] = url[i];
     ++path_pos;
@@ -546,7 +563,7 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
 
     err = do_connect(&socket_data, url_data->protocol, 1);
     err = send_data_and_revice_response(&socket_data, header, response);
-    if(!err) {
+    if(err != SUCCESS) {
       printf("Error: do_conenct\n");
 
       FREE(header);

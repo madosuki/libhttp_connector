@@ -58,13 +58,15 @@ typedef enum {
 } HttpVersion;
 
 typedef enum {
-  FailedMemoryAllocate,
-  Success,
-  DataIsNull,
-  DataIsLess,
-  NotFoundBody,
-  SizeOver,
+  SUCCESS,
+  FAI_MEM_ALLOC,
+  DATA_IS_NULL,
+  DATA_IS_LESS,
+  NOT_FOUND_BODY,
+  SIZE_OVER,
   UN_SUPPORT_SOCKET_FAMILIY,
+  FAI_SET_IP_ADDR,
+  FAI_SET_RES_DATA,
 } LibHttpConnectorError;
 
 typedef enum {
@@ -124,9 +126,9 @@ typedef struct ResponseStruct
 
 typedef struct IppAddrStringStruct
 {
-  size_t size;
+  size_t str_size;
   char *ipaddr_str;
-} ipaddr_str_s;
+} ipaddr_s;
 
 typedef struct SockAddrStruct
 {
@@ -135,15 +137,9 @@ typedef struct SockAddrStruct
   struct sockaddr_in6 for_ipv6;
 } sock_addr_s;
 
-typedef struct IpAddrStruct
-{
-  size_t list_size;
-  ipaddr_str_s *list;
-} ipaddr_s;
-
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result);
 
-LibHttpConnectorError get_ipaddr_from_addrinfo(struct addrinfo *addr_info, ipaddr_str_s *dst);
+LibHttpConnectorError get_ipaddr_str_from_addrinfo(struct addrinfo *addr_info, ipaddr_s *dst);
 
 int get_addr_info_from_hostname(const char* hostname, const char *service, struct addrinfo *hints, struct addrinfo **addr_info);
 
@@ -152,7 +148,7 @@ void init_socket(socket_data_s *socket_data, int af, int socktype);
 LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, const char *service, const url_data_s *url_data);
 
 int do_connect(socket_data_s *socket_data, int protocol, int is_ssl);
-int send_data_and_revice_response(socket_data_s *socket_data, const char *data, response_s *response);
+LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, const char *data, response_s *response);
 
 int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t data_size, Method method, url_data_s *url_data);
 
