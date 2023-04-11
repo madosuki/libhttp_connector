@@ -1,4 +1,8 @@
 #include "./http_connector.h"
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
@@ -91,112 +95,88 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
   return Success;
 }
 
-LibHttpConnectorError get_ipaddr_from_host(struct hostent *host, int af, ipaddr_s *dst)
+LibHttpConnectorError get_ipaddr_from_addrinfo(struct addrinfo *addr_info, ipaddr_str_s *dst)
 {
-  dst->list = INIT_ARRAY(ipaddr_str_s, 1024);
-  if (dst->list == NULL) {
+  printf("%d\n", addr_info->ai_family);
+  size_t str_size = 0;
+  switch (addr_info->ai_family) {
+  case AF_INET:
+    str_size = INET_ADDRSTRLEN;
+    break;
+  case AF_INET6:
+    str_size = INET6_ADDRSTRLEN;
+    break;
+  default:
+    return UN_SUPPORT_SOCKET_FAMILIY;
+  }
+
+  dst->ipaddr_str = INIT_ARRAY(char, str_size);
+  if (dst->ipaddr_str == NULL) {
+    return FailedMemoryAllocate;
+  }
+  
+  char *buf = INIT_ARRAY(char, str_size);
+  if (buf == NULL) {
     return FailedMemoryAllocate;
   }
 
-  size_t str_size = INET_ADDRSTRLEN;
-  if (af == AF_INET6) {
-    str_size = INET6_ADDRSTRLEN;
-  }
-  
+  const char *pointer = inet_ntop(addr_info->ai_family, &((struct sockaddr_in *)addr_info->ai_addr)->sin_addr, buf, str_size);
+  memmove(dst->ipaddr_str, buf, str_size);
 
-  int count = 0;
-  for (int i = 0; host->h_addr_list[i]; ++i) {
-    if (i >= 1024) {
-      ipaddr_str_s* tmp = realloc(dst->list, i);
-      
-      if (tmp == NULL) {
-        dst->list_size = i;
-        return FailedMemoryAllocate;
-      }
-
-      dst->list = tmp;
-    }
-    
-    char *buf = INIT_ARRAY(char, str_size);
-    if (buf == NULL) {
-      return FailedMemoryAllocate;
-    }
-    const char *pointer = inet_ntop(af, host->h_addr_list[0], buf, str_size);
-    
-    dst->list[i].ipaddr_str = INIT_ARRAY(char, str_size);
-    if (dst->list[i].ipaddr_str == NULL) {
-      FREE(buf);
-      return -1;
-    }
-    dst->list[i].size = str_size;
-    memmove(dst->list[i].ipaddr_str, buf, str_size);
-    ++count;
-  }
-  dst->list_size = count;
+  size_t str_length = strlen(dst->ipaddr_str);
+  dst->size = str_length;
   
   return Success;
 }
 
 
-int resolve_hostname(const char* hostname, int af, struct hostent **host)
+int get_addr_info_from_hostname(const char* hostname, const char *service, struct addrinfo *hints, struct addrinfo **addr_info)
 {
-  *host = gethostbyname2(hostname, af);
+  int err = 0;
+  err = getaddrinfo(hostname, service, hints, addr_info);
 
-  if(host == NULL) {
-    fprintf(stderr, "gethostbyname() failed: %s\n", strerror(errno));
-    return -1;
-  }
-
-  return 1;
+  return err;
 }
 
-void init_socket(socket_data_s *socket_data)
+void init_socket(socket_data_s *socket_data, int af, int socktype)
 {
   #ifdef _WIN32
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    SOCKET sock = socket(af, socktype, 0);
   #else
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int sock = socket(af, socktype, 0);
   #endif
 
   struct sockaddr_in target;
-  target.sin_family = AF_INET;
-  // target.sin_port = htons(HTTP_PORT);
-  // target.sin_port = htons(HTTPS_PORT);
+  target.sin_family = af;
 
   socket_data->socket = sock;
   socket_data->target = target;
   
 }
 
-LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, const url_data_s *url_data)
+LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, const char *service, const url_data_s *url_data)
 {
-
-  struct hostent *host;
-  LibHttpConnectorError err = resolve_hostname(url_data->hostname, af, &host);
+  struct addrinfo *addr_info = malloc(sizeof(struct addrinfo));
+  struct addrinfo hints;
+  hints.ai_family = af;
+  hints.ai_socktype = socktype;
+  LibHttpConnectorError err = get_addr_info_from_hostname(url_data->hostname, service, &hints, &addr_info);
   
-  ipaddr_s ipaddr;
-  err = get_ipaddr_from_host(host, af, &ipaddr);
+  ipaddr_str_s ipaddr;
+  err = get_ipaddr_from_addrinfo(addr_info, &ipaddr);
   if (err != Success) {
-    if (ipaddr.list != NULL) {
-      for (size_t i = 0; i < ipaddr.list_size; ++i) {
-        if (ipaddr.list[i].ipaddr_str != NULL) {
-          FREE(ipaddr.list[i].ipaddr_str);
-        }
-      }
+    freeaddrinfo(addr_info);
 
-      FREE(ipaddr.list);
-    }
     return err;
   }
 
   char* addr = "127.0.0.1";
 
-  if(ipaddr.list[0].ipaddr_str != NULL)
-    addr = ipaddr.list[0].ipaddr_str;
+  if(ipaddr.ipaddr_str != NULL)
+    addr = ipaddr.ipaddr_str;
 
-  socket_data->target.sin_addr.s_addr = inet_addr(addr);
+  err = inet_pton(addr_info->ai_family, addr, &socket_data->target.sin_addr.s_addr);
 
-  FREE(ipaddr.list);
   return Success;
 }
 
@@ -524,7 +504,7 @@ char* create_header(url_data_s *url_data, const char *user_agent, Method method,
   return header;
 }
 
-int get_http_response(const char *url, int af, const char *user_agent, response_s *response)
+int get_http_response(const char *url, int af, int socktype, const char *service, const char *user_agent, response_s *response)
 {
   url_data_s *url_data = (url_data_s*)malloc(sizeof(url_data_s));
   int err = set_url_data(url, strlen(url), NULL, 0, GET, url_data);
@@ -566,7 +546,7 @@ int get_http_response(const char *url, int af, const char *user_agent, response_
 
     init_socket(&socket_data);
 
-    set_addr_from_hostname(&socket_data, af, url_data);
+    set_addr_from_hostname(&socket_data, af, socktype, service, url_data);
 
     /* response_s *response = INIT_ARRAY(response_s, sizeof(response_s)); */
     /* if(response == NULL) { */
