@@ -1,10 +1,4 @@
 #include "./http_connector.h"
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
