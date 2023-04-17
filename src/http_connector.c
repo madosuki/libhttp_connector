@@ -218,7 +218,7 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
   
   int count = 0;
   char *result = NULL;
-  long result_size = 0;
+  long result_size = 1;
   do{
     memcpy(&fds, &readfds, sizeof(fd_set));
 
@@ -247,13 +247,20 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
       strncpy(result, buf, readed_size);
     } else {
       char *check_realloc = realloc(result, result_size);
-      if(check_realloc != NULL)
-        strcat(result, buf);
+      if(check_realloc != NULL) {
+        result = check_realloc;
+        strncat(result, buf, readed_size);
+      }
     }
 
     ++count;
 
   } while(readed_size > 0 && count < 3);
+
+  // result_size is 1 meaning is terminating string length
+  if (result_size == 1) {
+    result_size = 0;
+  }
 
  end:
   if(is_ssl) {
