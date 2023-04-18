@@ -1,4 +1,5 @@
 #include "./http_connector.h"
+#include <netdb.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
@@ -138,6 +139,16 @@ int get_addr_info_from_hostname(const char* hostname, const char *service, struc
 {
   int err = 0;
   err = getaddrinfo(hostname, service, hints, addr_info);
+  if (err != 0) {
+    int code = 0;
+    #ifdef _WIN32
+    code = WSAGetLastError();
+    #else
+    code = errno;
+    #endif
+    
+    printf("getaddrinfo error (%d) : %s\n", code, gai_strerror(code));
+  }
 
   return err;
 }
@@ -163,9 +174,13 @@ LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af,
   struct addrinfo hints;
   hints.ai_family = af;
   hints.ai_socktype = socktype;
-  LibHttpConnectorError err = get_addr_info_from_hostname(url_data->hostname, service, &hints, &addr_info);
+  int err = get_addr_info_from_hostname(url_data->hostname, service, &hints, &addr_info);
+  if (err == -1) {
+    freeaddrinfo(addr_info);
+    return FAI_SET_HOSTNAME;
+  }
 
-  ipaddr_s ipaddr;
+  ipaddr_s ipaddr;  
   err = get_ipaddr_str_from_addrinfo(addr_info, &ipaddr);
   if (err != SUCCESS) {
     freeaddrinfo(addr_info);
@@ -184,7 +199,6 @@ LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af,
     return FAI_SET_IP_ADDR;
   }
 
-
   return SUCCESS;
 }
 
@@ -194,7 +208,7 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
   if (buf == NULL) {
     return FAI_MEM_ALLOC;
   }
-  
+
   long readed_size = 0;
   int err = 0;
   SSL *ssl = socket_data->ssl;
@@ -285,20 +299,25 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
   return SUCCESS;
 }
 
-int do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
+LibHttpConnectorError do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
 {
-  if(protocol == HTTP_PORT)
+  if(protocol == HTTP_PORT) {
     socket_data->target.sin_port = htons(HTTP_PORT);
-  else
+  } else if (protocol == HTTPS_PORT) {
     socket_data->target.sin_port = htons(HTTPS_PORT);
+  } else {
+    return UNKNOWN_PROTOCOL;
+  }
 
-  int err;
+  int err = 0;
 
   err = connect(socket_data->socket, (struct sockaddr *)&socket_data->target, sizeof(socket_data->target));
   if (err == -1) {
     printf("do_connect error: %s\n", strerror(errno));
+    return CONNECT_ERROR;
   }
 
+  
   SSL_CTX *ctx = NULL;
   SSL *ssl = NULL;
 
@@ -318,7 +337,7 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
       SSL_free(ssl);
       SSL_CTX_free(ctx);
       
-      return -1;
+      return ERROR_SSL_SET_FD;
     }
 
     err = SSL_connect(ssl);
@@ -328,7 +347,7 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
       SSL_free(ssl);
       SSL_CTX_free(ctx);
       
-      return -1;
+      return ERROR_SSL_CONNECT;
     }
   }
 
@@ -336,7 +355,8 @@ int do_connect(socket_data_s *socket_data, int protocol, int is_ssl)
   socket_data->ssl = ssl;
   socket_data->ssl_ctx = ctx;
 
-  return 1;
+
+  return SUCCESS;
 }
 
 void close_socket(socket_data_s *socket_data) {
@@ -361,7 +381,6 @@ int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t da
   }
 
   char check_protocol[8];
-  
   for(int i = 0; i < 7; ++i) {
     check_protocol[i] = url[i];
   }
@@ -370,11 +389,11 @@ int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t da
   int is_valid_protocol = 0;
   int protocol = 0;
 
+  printf("cmp: %s\n", check_protocol);
   if(strcmp(check_protocol, "http://") == 0) {
     is_valid_protocol = 1;
     protocol = HTTP_PORT;
-  }
-  else if(strcmp(check_protocol, "https:/") == 0) {
+  } else if(strcmp(check_protocol, "https:/") == 0) {
     is_valid_protocol = 1;
     protocol = HTTPS_PORT;
   }
@@ -439,6 +458,7 @@ int set_url_data(const char *url, ssize_t url_size, const char *data, ssize_t da
   url_data->url_size = url_size;
   strncpy(url_data->url, url, url_size);
 
+  url_data->protocol = protocol;
 
   return 1;
 }
@@ -508,21 +528,24 @@ char* create_header(url_data_s *url_data, const char *user_agent, Method method,
   return header;
 }
 
-int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, const char *user_agent, response_s *response)
+LibHttpConnectorError get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, const char *user_agent, response_s *response)
 {
   url_data_s *url_data = (url_data_s*)malloc(sizeof(url_data_s));
   int err = set_url_data(url, strlen(url), NULL, 0, GET, url_data);
   if(err == -1) {
     FREE(url_data);
     puts("Error: failed set_url_data in get_http_response\n");
-    return -1;
+    return FAI_SET_URL_DATA;
   }
-  
+
+  int is_ssl = 0;
   int protocol_for_http = url_data->protocol;
   char *service = "http";
   if (protocol_for_http == HTTPS_PORT) {
     service = "https";
+    is_ssl = 1;
   }
+  printf("service: %s\n", service);
 
   int socktype = 0;
   switch (protocol) {
@@ -531,6 +554,7 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
     break;
   case UDP:
     socktype = SOCK_DGRAM;
+    break;
   }
   
   if(url_data->body != NULL)
@@ -548,10 +572,10 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
 
       FREE(url_data);
 
-      return -1;
+      return FAI_CREATE_HEADER;
     }
 
-    printf("request header: %s\n", header);
+    printf("request header:\n%s\n", header);
 
     socket_data_s socket_data;
 
@@ -562,9 +586,16 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
 
     init_socket(&socket_data, af, socktype);
 
-    set_addr_from_hostname(&socket_data, af, socktype, service, url_data);
+    err = set_addr_from_hostname(&socket_data, af, socktype, service, url_data);
+    if (err != SUCCESS) {
+      return err;
+    }
 
-    err = do_connect(&socket_data, url_data->protocol, 1);
+    err = do_connect(&socket_data, url_data->protocol, is_ssl);
+    if (err != SUCCESS) {
+      return err;
+    }
+    
     err = send_data_and_revice_response(&socket_data, header, response);
     if(err != SUCCESS) {
       printf("Error: do_conenct\n");
@@ -576,7 +607,7 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
       FREE(url_data->url);
       FREE(url_data);
 
-      return -1;
+      return FAI_CONNECT;
     }
 
 
@@ -593,5 +624,5 @@ int get_http_response(const char *url, int af, PROTOCOL_FOR_SOCKET protocol, con
     WSACleanup();
   #endif
 
-  return 1;
+  return SUCCESS;
 }
