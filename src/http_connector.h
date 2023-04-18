@@ -33,6 +33,8 @@
 #include <openssl/err.h>
 #include <openssl/ssl3.h>
 
+#include <regex.h>
+
 #define HTTP_PORT 80
 #define HTTPS_PORT 443
 
@@ -62,6 +64,7 @@ typedef enum {
   FAI_MEM_ALLOC,
   DATA_IS_NULL,
   DATA_IS_LESS,
+  BUF_IS_NULL,
   NOT_FOUND_BODY,
   SIZE_OVER,
   UN_SUPPORT_SOCKET_FAMILIY,
@@ -71,6 +74,9 @@ typedef enum {
   FAI_SET_URL_DATA,
   FAI_CREATE_HEADER,
   FAI_CONNECT,
+  FAI_GET_HTTP_HEADER,
+  FAI_COMP_REGEX,
+  NOT_MATCHES_PATTERN,
   UNKNOWN_PROTOCOL,
   CONNECT_ERROR,
   ERROR_SSL_SET_FD,

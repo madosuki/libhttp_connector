@@ -1,9 +1,37 @@
 #include "./http_connector.h"
-#include <netdb.h>
-#include <netinet/in.h>
+#include <regex.h>
 
-LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
-{
+LibHttpConnectorError get_content_length_from_raw_header(const char *header, ssize_t size, int *length) {
+  const char *regex_pattern = "Content-Length: ([0-9]+)";
+  regex_t regex_buf;
+
+  if (regcomp(&regex_buf, regex_pattern, REG_EXTENDED | REG_NEWLINE) != 0) {
+    return FAI_COMP_REGEX;
+  }
+
+  regmatch_t matches[3];
+  int matches_size = sizeof(matches) / sizeof(regmatch_t);
+  if (regexec(&regex_buf, header, matches_size, matches, 0) != 0) {
+    return NOT_MATCHES_PATTERN;
+  }
+
+  for (int i = 0; i < matches_size; ++i) {
+    int start = matches[i].rm_so;
+    int end = matches[i].rm_eo;
+    if (start == -1 || end == -1) {
+      continue;
+    }
+
+    for (int j = start; j < end; ++j) {
+      printf("%c", header[j]);
+    }
+    puts("");
+  }
+
+  return SUCCESS;
+}
+
+LibHttpConnectorError get_http_header_from_response(const char *response_data, ssize_t size, response_s *res) {
   if(response_data == NULL) {
     printf("Error: response data is NULL\n");
     return DATA_IS_NULL;
@@ -75,7 +103,37 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
   }
 
   header = reallocated;
+  res->raw_header = header;
+  res->raw_header_size = count;
+  
+  return SUCCESS;
+}
 
+LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
+{
+  if(response_data == NULL) {
+    printf("Error: response data is NULL\n");
+    return DATA_IS_NULL;
+  }
+
+  if(size < 1) {
+    printf("Error: size is less than one.\n");
+    return DATA_IS_LESS;
+  }
+
+  if (result == NULL) {
+    return BUF_IS_NULL;
+  }
+
+  int err = 0;
+  if (result->header_list_size == 0) {
+    err = get_http_header_from_response(response_data, size, result);
+    if (err != SUCCESS) {
+      return FAI_GET_HTTP_HEADER;
+    }
+  }
+
+  int count = result->raw_header_size;
   char *body = INIT_ARRAY(char, size + 1);
   ssize_t body_pos = 0;
   for(ssize_t i = count; i < size; ++i) {
@@ -87,8 +145,6 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
   result->body_size = body_pos + 1;
   result->body = body;
 
-  result->raw_header_size = count;
-  result->raw_header = header;
   
   return SUCCESS;
 }
@@ -255,7 +311,7 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
     if(FD_ISSET(socket_data->socket, &fds)) {
 
       memset(buf, 0, BUF_SIZE);
-    
+      
       if(!is_ssl)
         readed_size = recv(socket_data->socket, buf, BUF_SIZE, 0);
       else
@@ -277,6 +333,17 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
     }
 
     ++count;
+
+    if (response->raw_header_size == 0) {
+      err = get_http_header_from_response(result, strlen(result), response);
+      if (err == SUCCESS) {
+        int length = -1;
+        err = get_content_length_from_raw_header(response->raw_header, response->raw_header_size, &length);
+        if (length <= result_size) {
+          break;
+        }
+      }
+    }
 
   } while(readed_size > 0 && count < 3);
 
