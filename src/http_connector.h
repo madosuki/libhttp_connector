@@ -153,7 +153,7 @@ int get_addr_info_from_hostname(const char* hostname, const char *service, struc
 
 void init_socket(socket_data_s *socket_data, int af, int socktype);
 
-LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, const char *service, const url_data_s *url_data);
+LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, int protocol, const char *service, const url_data_s *url_data);
 
 LibHttpConnectorError do_connect(socket_data_s *socket_data, int protocol, int is_ssl);
 LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, const char *data, response_s *response);

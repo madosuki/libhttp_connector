@@ -1,5 +1,6 @@
 #include "./http_connector.h"
 #include <netdb.h>
+#include <netinet/in.h>
 
 LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t size, response_s *result)
 {
@@ -146,7 +147,8 @@ int get_addr_info_from_hostname(const char* hostname, const char *service, struc
     #else
     code = errno;
     #endif
-    
+
+    printf("getaddrinfo error from err (%d) : %s\n", err, gai_strerror(err));
     printf("getaddrinfo error (%d) : %s\n", code, gai_strerror(code));
   }
 
@@ -168,12 +170,23 @@ void init_socket(socket_data_s *socket_data, int af, int socktype)
   socket_data->target = target;
 }
 
-LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, const char *service, const url_data_s *url_data)
+LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af, int socktype, int protocol, const char *service, const url_data_s *url_data)
 {
   struct addrinfo *addr_info = malloc(sizeof(struct addrinfo));
   struct addrinfo hints;
   hints.ai_family = af;
   hints.ai_socktype = socktype;
+  hints.ai_flags = AI_PASSIVE;
+
+  switch (protocol) {
+  case TCP:
+    hints.ai_protocol = IPPROTO_TCP;
+    break;
+  case UDP:
+    hints.ai_protocol = IPPROTO_UDP;
+    break;
+  }
+  
   int err = get_addr_info_from_hostname(url_data->hostname, service, &hints, &addr_info);
   if (err == -1) {
     freeaddrinfo(addr_info);
@@ -195,7 +208,7 @@ LibHttpConnectorError set_addr_from_hostname(socket_data_s *socket_data, int af,
 
   err = inet_pton(addr_info->ai_family, addr, &socket_data->target.sin_addr.s_addr);
   freeaddrinfo(addr_info);
-  if (err != 0) {
+  if (!err) {
     return FAI_SET_IP_ADDR;
   }
 
@@ -586,7 +599,7 @@ LibHttpConnectorError get_http_response(const char *url, int af, PROTOCOL_FOR_SO
 
     init_socket(&socket_data, af, socktype);
 
-    err = set_addr_from_hostname(&socket_data, af, socktype, service, url_data);
+    err = set_addr_from_hostname(&socket_data, af, socktype, protocol, service, url_data);
     if (err != SUCCESS) {
       return err;
     }
