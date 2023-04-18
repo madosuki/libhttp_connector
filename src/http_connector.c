@@ -27,6 +27,7 @@ LibHttpConnectorError get_content_length_from_raw_header(const char *header, ssi
     memmove(num_str, header + start, size);
 
     long result = strtol(num_str, NULL, 10);
+    FREE(num_str);
     *length = result;
   }
 
