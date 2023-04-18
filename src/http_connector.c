@@ -1,7 +1,7 @@
 #include "./http_connector.h"
-#include <regex.h>
+#include <stdlib.h>
 
-LibHttpConnectorError get_content_length_from_raw_header(const char *header, ssize_t size, int *length) {
+LibHttpConnectorError get_content_length_from_raw_header(const char *header, ssize_t size, long *length) {
   const char *regex_pattern = "Content-Length: ([0-9]+)";
   regex_t regex_buf;
 
@@ -15,17 +15,19 @@ LibHttpConnectorError get_content_length_from_raw_header(const char *header, ssi
     return NOT_MATCHES_PATTERN;
   }
 
-  for (int i = 0; i < matches_size; ++i) {
+  for (int i = 1; i < matches_size; ++i) {
     int start = matches[i].rm_so;
     int end = matches[i].rm_eo;
     if (start == -1 || end == -1) {
       continue;
     }
 
-    for (int j = start; j < end; ++j) {
-      printf("%c", header[j]);
-    }
-    puts("");
+    int size = (end - start);
+    char *num_str = INIT_ARRAY(char, size + 1);
+    memmove(num_str, header + start, size);
+
+    long result = strtol(num_str, NULL, 10);
+    *length = result;
   }
 
   return SUCCESS;
@@ -84,13 +86,6 @@ LibHttpConnectorError get_http_header_from_response(const char *response_data, s
     return SIZE_OVER;
   }
 
-  if(count >= size) {
-    FREE(header);
-
-    printf("Error: missing body\n");
-
-    return NOT_FOUND_BODY;
-  }
   header[count] = '\0';
 
   char *reallocated = realloc(header, count + 1);
@@ -134,6 +129,11 @@ LibHttpConnectorError set_http_response_data(const char *response_data, ssize_t 
   }
 
   int count = result->raw_header_size;
+  if(count >= size) {
+    printf("Error: missing body\n");
+    return NOT_FOUND_BODY;
+  }
+
   char *body = INIT_ARRAY(char, size + 1);
   ssize_t body_pos = 0;
   for(ssize_t i = count; i < size; ++i) {
@@ -298,6 +298,7 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
   int count = 0;
   char *result = NULL;
   long result_size = 1;
+  long content_length = -1;
   do{
     memcpy(&fds, &readfds, sizeof(fd_set));
 
@@ -334,15 +335,15 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
 
     ++count;
 
-    if (response->raw_header_size == 0) {
+    if (response->raw_header_size <= 0) {
       err = get_http_header_from_response(result, strlen(result), response);
       if (err == SUCCESS) {
-        int length = -1;
-        err = get_content_length_from_raw_header(response->raw_header, response->raw_header_size, &length);
-        if (length <= result_size) {
-          break;
-        }
+        err = get_content_length_from_raw_header(response->raw_header, response->raw_header_size, &content_length);
       }
+    }
+
+    if ((result_size - response->raw_header_size) >= content_length) {
+      break;
     }
 
   } while(readed_size > 0 && count < 3);
@@ -365,6 +366,11 @@ LibHttpConnectorError send_data_and_revice_response(socket_data_s *socket_data, 
   FREE(buf);
 
   if(set_http_response_data(result, strlen(result), response) != SUCCESS) {
+    /* if (response->raw_header_size > 0) { */
+    /*   FREE(response->raw_header); */
+    /*   response->raw_header_size = 0; */
+    /* } */
+    
     FREE(result);
     return FAI_SET_RES_DATA;
     /* printf("header size: %ld\nheader: %s\n\nbody size: %ld\nbody: %s\n", */
@@ -679,6 +685,11 @@ LibHttpConnectorError get_http_response(const char *url, int af, PROTOCOL_FOR_SO
     err = send_data_and_revice_response(&socket_data, header, response);
     if(err != SUCCESS) {
       printf("Error: do_conenct\n");
+
+      if (response->raw_header_size > 0) {
+        FREE(response->raw_header);
+        response->raw_header_size = 0;
+      }
 
       FREE(header);
           
